@@ -117,6 +117,7 @@ bluerayscan scan . --max-file-size 8M       # read the big ones too
 bluerayscan scan . --no-gitignore           # also scan git-ignored files
 bluerayscan scan . --no-example-allowlist   # include documented and invented keys
 bluerayscan scan . --no-suppression         # read past the ignore markers
+bluerayscan scan . --no-color               # or set NO_COLOR in the environment
 
 bluerayscan scan . --write-baseline         # accept what is already there
 bluerayscan scan . --baseline               # fail only on what is new

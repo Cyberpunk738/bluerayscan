@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 import fixtures
+import terminal
 from bluerayscan import cli, diffs, history
 
 
@@ -279,6 +280,46 @@ class TestTheCommand(unittest.TestCase):
         code, _, errors = run(["history", "--min-severity", "urgent"], stdin="")
         self.assertEqual(code, 2)
         self.assertIn("urgent", errors)
+
+
+def run_tty(argv, stdin):
+    """Run the CLI over ``stdin`` with stdout pretending to be a terminal."""
+    stdout, stderr = terminal.TtyStringIO(), io.StringIO()
+    saved = sys.stdin
+    sys.stdin = io.StringIO(stdin)
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            cli.main(argv)
+    finally:
+        sys.stdin = saved
+    return stdout.getvalue()
+
+
+class TestHistoryColor(unittest.TestCase):
+    LEAK = f'AWS_KEY = "{fixtures.REALISTIC_AWS_KEY_ID}"'
+
+    def stream(self):
+        return commit("abc1234", "2026-03-04 10:00:00 +0000", added("app.py", 3, [self.LEAK]))
+
+    def test_explicit_no_color_flag_disables_colour(self):
+        with terminal.temporary_env(NO_COLOR=None):
+            output = run_tty(["history", "--fail-on", "none", "--no-color"], self.stream())
+        self.assertNotIn("\033", output)
+
+    def test_no_color_unset_keeps_colour(self):
+        with terminal.temporary_env(NO_COLOR=None):
+            output = run_tty(["history", "--fail-on", "none"], self.stream())
+        self.assertIn("\033", output)
+
+    def test_no_color_empty_string_keeps_colour(self):
+        with terminal.temporary_env(NO_COLOR=""):
+            output = run_tty(["history", "--fail-on", "none"], self.stream())
+        self.assertIn("\033", output)
+
+    def test_no_color_non_empty_disables_colour(self):
+        with terminal.temporary_env(NO_COLOR="1"):
+            output = run_tty(["history", "--fail-on", "none"], self.stream())
+        self.assertNotIn("\033", output)
 
 
 if __name__ == "__main__":

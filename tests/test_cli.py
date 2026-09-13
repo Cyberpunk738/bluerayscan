@@ -2,11 +2,13 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
 
 import fixtures
+import terminal
 from bluerayscan import cli
 from bluerayscan.discovery import iter_files
 from bluerayscan.findings import Severity
@@ -772,6 +774,65 @@ class TestQuietAndSort(unittest.TestCase):
             for finding in json.loads(output)["findings"]
         ]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
+
+
+#: Every SGR escape sequence, for asserting that colour is the only difference.
+_SGR = re.compile(r"\033\[[0-9;]*m")
+
+
+def _without_colour(text):
+    return _SGR.sub("", text)
+
+
+def run_tty(argv):
+    """Run the CLI with stdout pretending to be a terminal."""
+    stdout, stderr = terminal.TtyStringIO(), io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        cli.main(argv)
+    return stdout.getvalue()
+
+
+class TestNoColor(unittest.TestCase):
+    def test_explicit_no_color_flag_disables_colour(self):
+        with sample_repo() as root, terminal.temporary_env(NO_COLOR=None):
+            output = run_tty(["scan", root, "--no-color"])
+        self.assertNotIn("\033", output)
+
+    def test_no_color_unset_keeps_colour(self):
+        with sample_repo() as root, terminal.temporary_env(NO_COLOR=None):
+            output = run_tty(["scan", root])
+        self.assertIn("\033", output)
+
+    def test_no_color_empty_string_keeps_colour(self):
+        with sample_repo() as root, terminal.temporary_env(NO_COLOR=""):
+            output = run_tty(["scan", root])
+        self.assertIn("\033", output)
+
+    def test_no_color_non_empty_disables_colour(self):
+        with sample_repo() as root, terminal.temporary_env(NO_COLOR="1"):
+            output = run_tty(["scan", root])
+        self.assertNotIn("\033", output)
+
+    def test_it_changes_the_colour_and_nothing_else(self):
+        # The property that matters for a scanner. An environment variable
+        # that could quietly change which findings are printed would be a way
+        # to switch the tool off from outside it, and silence nobody can see
+        # is the failure mode this whole tool exists to avoid.
+        with sample_repo() as root:
+            with terminal.temporary_env(NO_COLOR=None):
+                coloured = run_tty(["scan", root])
+            with terminal.temporary_env(NO_COLOR="1"):
+                plain = run_tty(["scan", root])
+        self.assertNotEqual(coloured, plain)
+        self.assertEqual(_without_colour(coloured), plain)
+
+    def test_the_exit_code_is_not_a_matter_of_colour(self):
+        with sample_repo() as root:
+            with terminal.temporary_env(NO_COLOR=None):
+                first = run(["scan", root])[0]
+            with terminal.temporary_env(NO_COLOR="1"):
+                second = run(["scan", root])[0]
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":
