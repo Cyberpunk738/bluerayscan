@@ -128,6 +128,9 @@ bluerayscan scan . --sort path              # group by file, to read rather than
 git diff --name-only origin/main | bluerayscan scan . --paths-from -
 ```
 
+Set the standard `NO_COLOR` environment variable to a non-empty value to disable ANSI colours;
+`--no-color` does the same for one invocation.
+
 That last line is the fast per-pull-request run: the scan is restricted to the
 files the branch touched. A listed path that no longer exists is skipped, since
 a diff lists deletions too, and a listed path that `.gitignore` covers is
@@ -627,3 +630,4 @@ privately rather than opening a public issue.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
