@@ -134,6 +134,21 @@ _STRUCTURED = (
         r"^(?=.*[A-Z][a-z])(?:[A-Z]{2,}|[A-Za-z][a-z]*)"
         r"(?:[A-Z][a-z]+|\d+[a-z]{2,})+[A-Z]*$"
     ),
+    # The same idea with an acronym *between* two humps: Signal-iOS assigns
+    # the string "lastKnownWorkingAPNSTokenKey" to a constant called
+    # lastKnownWorkingAPNSTokenKey, and "kUDUnrestrictedAccessKey" likewise.
+    #
+    # A separate pattern rather than a third alternative in the one above,
+    # because allowing an interior run of capitals needs every other hump to
+    # be a real word -- a capital and *two* or more lower-case letters, not
+    # one. Without that the suite's random-token property test found
+    # "ntNosjRjMjoZmHghZDXQnzp" in a few hundred tries, which parses as five
+    # humps and an acronym and is a generated token. Widening the pattern
+    # above instead would have taken that with it.
+    re.compile(
+        r"^(?=.*[A-Z][a-z])(?:[A-Z]{2,}|[A-Za-z][a-z]*)"
+        r"(?:[A-Z][a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]))+[A-Z]*$"
+    ),
     # A version in the first word and words after it: Keycloak's
     # "oauth2DeviceAuthorizationGrantDisabledMessage". The digits have to be
     # in the *first* word and every later one has to be a capital and two or
@@ -238,6 +253,12 @@ _STRUCTURED = (
     # A sentinel constant, which by convention starts where an identifier
     # cannot: "__n8n_BLANK_VALUE_e5362baf-...". Credentials do not.
     re.compile(r"^__"),
+    # A dollar-prefixed dotted reference: API Gateway selects an API key with
+    # "$request.header.x-api-key" or "$context.authorizer.usageIdentifierKey",
+    # and terraform-provider-aws asserts on both. The dot is what makes this
+    # safe next to the shouted "$NAME" rule above -- a password may open with
+    # a dollar, but not with a dollar and a dotted path of word characters.
+    re.compile(r"^\$[A-Za-z_][\w-]*(?:\.[\w-]+)+$"),
     # A reference into a document: "#/components/schemas/PasswordChallenge".
     # An OpenAPI schema is tens of thousands of these, and the ones that end in
     # a word like "Challenge" or "Token" are the ones a secret rule reads.
@@ -246,6 +267,18 @@ _STRUCTURED = (
     # Constants files are full of these, and a constant whose *name* ends in
     # "secret" is still a name.
     re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$"),
+    # The same thing with camel-case after the dots, which is what an Android
+    # preference key looks like: Signal assigns "backup.mediaCredentials" to a
+    # constant called KEY_MEDIA_CREDENTIALS, and six more like it in one file.
+    # Two dotted segments is fewer than the reverse-DNS filter above wants, so
+    # the humps have to carry the argument instead: every one is a capital and
+    # two or more lower-case letters, which a base64 run is not -- a JWT's
+    # middle segment "eyJzdWIiOiJhYmMxMjM0NTY3ODkifQ" breaks apart on the very
+    # first hump.
+    re.compile(
+        r"^[a-z][a-z0-9]*(?:[A-Z][a-z]{2,}[0-9]*)*"
+        r"(?:\.[a-z][a-z0-9]*(?:[A-Z][a-z]{2,}[0-9]*)*)+$"
+    ),
     # Words joined by hyphens or underscores: "unstructured", "content-type",
     # "Proxy-Authorization". Generated credentials carry digits
     # or mixed case; a pure word-list slug is vocabulary. The cost is that a
@@ -340,8 +373,18 @@ def entropy_floor(value: str) -> float:
 #: ``"GITHUB_TOKEN_${org^^}"`` is a variable name being assembled.
 #: A value with a brace-delimited placeholder in it: "${VAR}", "{{ x }}",
 #: "%{count}", "#{Rails.env}", "Bearer {env:TOKEN}". Credentials have no
-#: braces in them, so the last of these is as safe as the rest.
-_EMBEDDED_INTERPOLATION = re.compile(r"\$\{|\$\(|\{\{|%\(|%\{|#\{|\{[^\s{}]{1,64}\}")
+#: braces in them, so the last of these is as safe as the rest -- including
+#: the empty pair Python's own format strings use, which is how Azure's
+#: examples write "SharedKey {}:{}" and assign it to ``authorization``.
+#:
+#: A bare "$NAME" counts too, where the name is shouted: that is shell, and
+#: "multiplier@https://$KV_NAME.vault.azure.net" is a Key Vault reference in
+#: an Azure example rather than the secret it points at. Shouted because a
+#: lower-case "$" run is what a bcrypt hash and a stray dollar in a password
+#: both look like.
+_EMBEDDED_INTERPOLATION = re.compile(
+    r"\$\{|\$\(|\{\{|%\(|%\{|#\{|\{[^\s{}]{0,64}\}|\$[A-Z][A-Z0-9_]+"
+)
 
 #: An angle-bracket placeholder anywhere in a value: "glrt-<TOKEN>" is what
 #: documentation writes where a real token will go.

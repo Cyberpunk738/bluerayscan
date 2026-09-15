@@ -295,6 +295,80 @@ class TestIdentifiersFromRoundFour(unittest.TestCase):
         )
 
 
+class TestIdentifiersFromRoundFive(unittest.TestCase):
+    """Values from Signal-Android and Azure's machine-learning examples."""
+
+    def test_a_dotted_camel_case_preference_key_is_a_key_name(self):
+        # app/src/main/java/.../keyvalue/BackupValues.kt assigns these to
+        # constants called KEY_MEDIA_CREDENTIALS and friends, seven in one
+        # file. Two dotted segments is one fewer than the reverse-DNS filter
+        # wants, so the humps carry the argument instead.
+        for value in ("backup.mediaCredentials", "backup.restoreState",
+                      "backup.messageCdnReadCredentialsTimestamp"):
+            with self.subTest(value=value):
+                self.assertTrue(heuristics.looks_like_placeholder(value))
+
+    def test_a_base64_run_is_not_a_dotted_identifier(self):
+        # A JWT is three dotted segments of base64 and must stay reportable;
+        # the middle one here breaks apart on its very first hump.
+        self.assertTrue(heuristics.looks_generated("dozjgNryP4J3jVmNHl0w5N"))
+
+    def test_an_empty_format_placeholder_is_still_a_placeholder(self):
+        # setup/setup-ci/security-scanner/amlsecscan.py builds an
+        # Authorization header this way and assigns it to "authorization".
+        self.assertTrue(heuristics.looks_like_placeholder("SharedKey {}:{}"))
+
+    def test_a_shouted_shell_variable_anywhere_is_interpolation(self):
+        # cli/deploy-moe-keyvault.sh: a Key Vault reference, not the secret
+        # it points at.
+        value = "multiplier@https://$KV_NAME.vault.azure.net"
+        self.assertTrue(heuristics.looks_like_placeholder(value))
+
+    def test_a_dollar_in_a_password_is_not_a_variable(self):
+        # Shouted is the requirement: a bcrypt hash and a stray dollar in a
+        # password both put lower-case after the "$".
+        self.assertTrue(heuristics.looks_generated("Tr0ub4dor$three3more"))
+
+
+class TestIdentifiersFromRoundSix(unittest.TestCase):
+    """Constants in Signal-iOS whose value is the constant's own name."""
+
+    def test_an_acronym_may_sit_between_two_humps(self):
+        # SignalServiceKit/Util/APNSRotationStore.swift and
+        # Messages/UD/OWSUDManager.swift. Round three handled an acronym at
+        # either end; the middle is where Apple's vocabulary puts them.
+        for value in ("kUDUnrestrictedAccessKey", "lastKnownWorkingAPNSTokenKey",
+                      "lastKnownWorkingAPNSTokenTimestampKey"):
+            with self.subTest(value=value):
+                self.assertTrue(heuristics.looks_like_placeholder(value))
+
+    def test_a_generated_token_does_not_parse_as_an_acronym(self):
+        # The suite's random-token property test found this in a few hundred
+        # tries against a first draft that allowed an interior acronym in the
+        # existing pattern: it parses as five humps and an acronym. Requiring
+        # every other hump to be a capital and *two* lower-case letters is
+        # what separates them.
+        self.assertTrue(heuristics.looks_generated("ntNosjRjMjoZmHghZDXQnzp"))
+
+    def test_a_real_key_in_the_same_file_is_still_reported(self):
+        # SignalServiceKit/Network/API/Giphy/GiphyAPI.swift assigns this to
+        # kGiphyApiKey, three lines from one of the constants above.
+        self.assertTrue(heuristics.looks_generated("ZsUpUm2L6cVbvei347EQNp7HrROjbOdc"))
+
+
+class TestReferencesFromRoundSeven(unittest.TestCase):
+    def test_a_dollar_prefixed_dotted_reference_is_a_reference(self):
+        # API Gateway selects an API key with these, and
+        # terraform-provider-aws asserts on both. Argo CD's own manual writes
+        # "$dex.github.clientSecret" as the documented way to point at a
+        # secret, and was told it had leaked one.
+        for value in ("$request.header.x-api-key",
+                      "$context.authorizer.usageIdentifierKey",
+                      "$dex.github.clientSecret", "$secrets.oldKey"):
+            with self.subTest(value=value):
+                self.assertTrue(heuristics.looks_like_placeholder(value))
+
+
 class TestTestPaths(unittest.TestCase):
     def test_fixture_trees_and_test_files_are_recognised(self):
         for path in (
@@ -305,6 +379,24 @@ class TestTestPaths(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertTrue(wellknown.is_test_path(path))
+
+    def test_a_fixture_directory_is_written_four_ways(self):
+        # terraform-provider-aws uses "test-fixtures" throughout, and the list
+        # knew only "fixtures" and "__fixtures__". The separators are what
+        # differ, so they are taken out before the comparison.
+        for path in (
+            "internal/service/rds/test-fixtures/stack.json",
+            "internal/service/transfer/test_fixtures/key",
+            "pkg/testfixtures/response.json",
+            "pkg/test-data/response.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(wellknown.is_test_path(path))
+
+    def test_a_directory_that_merely_starts_with_test_is_not(self):
+        for path in ("build/test-results/report.xml", "src/testbed/main.go"):
+            with self.subTest(path=path):
+                self.assertFalse(wellknown.is_test_path(path))
 
     def test_ordinary_source_is_not(self):
         for path in ("src/app/main.go", "cmd/server/config.py", "latest/index.html"):

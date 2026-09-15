@@ -97,12 +97,35 @@ Two consequences worth knowing before touching a rule:
 If you find yourself lowering a severity because a rule is unreliable, lower
 the confidence instead. That is what it is for.
 
-### Findings left alone on purpose
+### The corpus, and what a round adds to it
 
 The precision programme reads every finding in a repository the corpus has
-never seen and fixes what is wrong. Some of what it reads is right, and some is
-wrong in a way no narrow fix reaches. Both get written down, so the next person
-reading the same output does not re-derive the argument.
+never seen and fixes what is wrong. A repository that produced a fix then has a
+claim on being pinned, because an unpinned one protects nothing: round eight
+can silently undo what round five fixed, and the comparison that would have
+caught it never runs. Five were pinned after rounds four to seven -- plausible,
+bitwarden-server, signal-ios, signal-android and bazel -- each for a language
+or a file format none of the other twenty-one carried.
+
+Three more were read in full and deliberately left unpinned, because a pin
+costs every future measurement twice over and costs a contributor a clone.
+terraform-provider-aws is 87 seconds of scan for one class that was already
+correct; azureml-examples is 931 MB for a behaviour a unit test pins with a
+synthetic payload; azure-pipelines-tasks is 251 MB for a single class. The
+reasoning is in `tools/corpus.json` beside the pins, where somebody proposing
+a twenty-seventh will read it.
+
+One consequence worth knowing when reading older numbers: every measurement
+recorded before that change -- in `ROADMAP.md`, in `CHANGELOG.md`, and in the
+prose here and in `docs/RULES.md` -- was taken across **twenty-one**
+repositories, and says so. They are records of what was measured, not claims
+about the corpus's present size, and they have deliberately not been restated.
+
+### Findings left alone on purpose
+
+Some of what the programme reads is right, and some is wrong in a way no narrow
+fix reaches. Both get written down, so the next person reading the same output
+does not re-derive the argument.
 
 - **`check_hostname = False` inside `if not validate_certs:`** (ansible). A
   correct finding about a line that is guarded. Telling them apart needs
@@ -169,6 +192,43 @@ reading the same output does not re-derive the argument.
   `tracker/compiler/analyze-sizes.js`). AP006 is right about the shape. The
   interpolated value is a filename the script just produced, which is the
   reading a human does in four seconds and a rule cannot do at all.
+- **A Google Maps key in a Gradle build file** (signal-android,
+  `app/build.gradle.kts`: `manifestPlaceholders["mapsKey"]`). The same key
+  class as the two weakened beside it, in a file that is not Google's
+  generated client configuration and does not say what the key is for. A key
+  pasted into a build script could be anything, and an unrestricted Maps key
+  is a real billing incident, so this one stays at high confidence.
+- **A keystore in a test resources tree** (signal-android, `ias.jks`). FN001
+  saying, correctly, that no text rule can read inside it. Same answer as
+  keycloak's seventy: a baseline, or a per-path rule.
+- **Eight hundred unpinned actions across three hundred and fifty-five
+  generated workflows** (azureml-examples). Every one correct, and the volume
+  is the point rather than a defect: a repository that generates a workflow
+  per example generates the same finding per example. `bluerayscan init`
+  records them once.
+
+- **Three encrypted RSA private keys in test fixtures** (azure-pipelines-tasks,
+  `Tasks/SshV0/Tests/` and `Tests-Legacy/L0/CopyFilesOverSSH/`). SEC004 at
+  critical and high confidence, which is deliberate: a fixture tree lowers the
+  rules that were already guessing, and a documented shape is not one of them.
+  A task that copies files over SSH needs a working key to test against.
+- **A real Giphy API key in shipped source** (signal-ios,
+  `SignalServiceKit/Network/API/Giphy/GiphyAPI.swift`). A true positive, three
+  lines from two constants whose value is their own name — which is the whole
+  argument for the identifier filters being narrow rather than generous.
+
+- **Four hundred and seventy Terraform findings in a provider's test data**
+  (terraform-provider-aws, `internal/service/*/testdata/`). Open security
+  groups, public S3 ACLs, `Action: "*"` with `Resource: "*"` -- every one of
+  them correct, and every one of them the fixture a provider needs in order to
+  test that it can create the thing. The confidence axis already handles it:
+  they arrive at medium and low, not high. This is what a fixture tree lowering
+  is *for*, and it is the largest example the programme has found.
+- **Two inputs interpolated into one shell command** (terraform-provider-aws,
+  `.github/actions/community_check/action.yml:44`). Reported twice on the same
+  line, which looked wrong and is not: the line really does interpolate
+  `inputs.core_contributors` and `inputs.user_login`, and both are the
+  composite action's own untrusted inputs.
 
 ## Five CI systems, one bug
 

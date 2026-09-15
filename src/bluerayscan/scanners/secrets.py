@@ -230,7 +230,7 @@ def _provider_findings(
     allow_examples: bool,
 ) -> Iterator[Finding]:
     """Every documented token shape, in one line of text."""
-    for rule, _secret, evidence in providers.findings_in(
+    for rule, _secret, evidence, confidence in providers.findings_in(
         path, line_number, line, matched_spans, allow_examples, allowlist.is_known_example
     ):
         yield Finding(
@@ -241,9 +241,15 @@ def _provider_findings(
             line=line_number,
             evidence=evidence,
             remediation=rule.remediation,
-            confidence=rule.confidence,
+            confidence=confidence,
             subject=redact(_secret),
         )
+
+
+#: A closing quote with a concatenation operator straight after it. Matched
+#: from the end of the value, so it asks about this literal rather than about
+#: anything else on the line.
+_CONCATENATED = re.compile(r"['\"`]\s*\+")
 
 
 def _scan_assignments(
@@ -314,6 +320,15 @@ def _scan_assignments(
     for rule_id, name, span, value, severity in candidates:
         # Do not report the same string twice under two rules.
         if any(start <= span[0] < end for start, end in matched_spans):
+            continue
+        # A literal being added to something is a fragment of a value rather
+        # than a value. azure-pipelines-tasks builds an IoT Hub Authorization
+        # header as '"SharedAccessSignature sr=" + resourceUri + "&sig=" + ...'
+        # and assigns it to "token"; the first fragment is all the rule saw.
+        # This is the same position the fixture convention takes from the
+        # other side -- a credential split across a concatenation is one no
+        # scanner reads, which is why this suite assembles its own.
+        if _CONCATENATED.match(line, span[1]):
             continue
         if allow_examples and allowlist.is_known_example(value):
             continue

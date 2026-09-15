@@ -104,6 +104,45 @@ class TestInventedCredentials(unittest.TestCase):
             "SEC006", self.scan("xox" + "b-8403192576-3401928475610-Xk92mQp7Lz4TvB8nRw1Y")
         )
 
+    def test_a_token_shape_inside_embedded_binary_is_a_coincidence(self):
+        # A Jupyter notebook stores a chart as '"image/png": "iVBORw0KGgo..."'
+        # on one line. Azure's machine-learning examples ship four hundred
+        # notebooks, and one of those blobs contains "EAAA" followed by
+        # fifty-six base64 characters -- reported as a Square access token, at
+        # critical, advising the reader that a live token can move money.
+        payload = ("iVBORw0KGgoAAAANSUhEUg" * 60) + "EAAA" + ("Qw9x" * 20)
+        line = '     "image/png": "' + payload + '",\n'
+        self.assertEqual(rule_ids(secrets.scan_text("chart.ipynb", line)), set())
+
+    def test_the_same_shape_on_a_line_of_its_own_is_still_reported(self):
+        # The run has to be long enough to be a payload. A token sitting in
+        # ordinary text is not inside one.
+        self.assertIn("SEC034", self.scan("EAAA" + "Qw9x" * 14))
+
+    def test_a_google_key_in_a_client_configuration_is_weakened(self):
+        # Signal commits its Firebase key twice, in app/ and demo/. A Firebase
+        # or Maps key ships inside the application binary; Google's guidance
+        # is to restrict it, not to hide it. The finding stays -- whether this
+        # one *is* restricted is exactly what the file does not say.
+        key = "AIza" + "SyDrfzNAPBPzX6key51hqo3p5LZXF5Y-yxU"
+        line = f'<string name="google_api_key" translatable="false">{key}</string>\n'
+        finding = next(
+            f
+            for f in secrets.scan_text("app/src/main/res/values/firebase.xml", line)
+            if f.rule_id == "SEC007"
+        )
+        self.assertEqual(finding.severity, Severity.HIGH)
+        self.assertEqual(finding.confidence, Confidence.MEDIUM)
+
+    def test_the_same_key_anywhere_else_is_not(self):
+        key = "AIza" + "SyDrfzNAPBPzX6key51hqo3p5LZXF5Y-yxU"
+        finding = next(
+            f
+            for f in secrets.scan_text("app/build.gradle.kts", f'mapsKey = "{key}"\n')
+            if f.rule_id == "SEC007"
+        )
+        self.assertEqual(finding.confidence, Confidence.HIGH)
+
     def test_the_same_shape_with_generated_bytes_is_reported(self):
         self.assertIn("SEC001", self.scan("AKIA" + "ZZ7Q4TWFN2XKLM3D"))
 
@@ -364,6 +403,19 @@ class TestTemplateFiles(unittest.TestCase):
     def test_it_is_weakened_rather_than_silenced(self):
         # A real key does get left in the file people copy.
         self.assertIn("SEC101", rule_ids(secrets.scan_text(".env.example", self.LINE)))
+
+    def test_a_literal_being_concatenated_is_a_fragment(self):
+        # azure-pipelines-tasks builds an IoT Hub Authorization header this
+        # way in Tasks/AzureIoTEdgeV2/util.ts. The first fragment is all the
+        # rule saw, and it is a query-parameter name.
+        line = 'var token = "SharedAccessSignature sr=" + resourceUri + "&sig=";\n'
+        self.assertEqual(rule_ids(secrets.scan_text("util.ts", line)), set())
+
+    def test_a_whole_value_next_to_a_concatenation_is_not(self):
+        # The question is asked from the end of *this* literal, so a plus
+        # elsewhere on the line says nothing about it.
+        line = 'const token = "Xk92mQp7Lz4TvB8nRw1Y"; const n = a + b;\n'
+        self.assertIn("SEC100", rule_ids(secrets.scan_text("util.ts", line)))
 
     def test_a_committed_phoenix_key_beginning_with_a_slash_is_reported(self):
         # Plausible's config/.env.dev, and three more .env files beside it.

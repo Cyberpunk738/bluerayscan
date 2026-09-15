@@ -136,6 +136,142 @@ forty-nine findings off the pinned corpus, every one read and every one a value
 that announces itself: `test-secret-key-12345`, `s3_access_key_id`,
 `sk-live-abcdef123456`. terragoat and kubernetes-goat are unchanged.
 
+Four false positives, one of them 269 findings at critical, and two bugs behind
+them -- from round five, which picked on **file format** rather than language:
+`Azure/azureml-examples` for four hundred Jupyter notebooks and three hundred
+and fifty-five generated workflows, and `signalapp/Signal-Android` for Kotlin
+and Gradle.
+
+- **A token shape inside embedded binary is a coincidence.** A notebook stores
+  a chart as `"image/png": "iVBORw0KGgo..."` on one line. `EAAA` is four
+  characters, so a few hundred kilobytes of base64 contains it by chance, and
+  one of Azure's charts was reported as a **Square access token, at critical**,
+  advising the reader that a live token can move money. No documented shape is
+  read inside an unbroken run of more than 1,024 base64 characters; the longest
+  shape in the table is 255.
+- **WF003 read a fallback expression as one reference.**
+  `${{ github.event.pull_request.number || github.ref }}`, which azureml writes
+  in **269 generated workflows**. A pull request number is an integer and is on
+  the harmless-field list, but read as one expression the last word is `ref`, so
+  the check never saw it. Each reference inside an interpolation is now read on
+  its own, and an untrusted field beside a harmless one is still reported.
+- **A `run:` key with nothing after it was read as a shell script.** A job or a
+  step may be *called* `run` -- saleor has one -- and everything nested under
+  it, including the job's own `if:` condition, was being scanned as shell. This
+  was a latent bug in every rule that reads a run block; the WF003 change above
+  is what surfaced it.
+- **A dotted identifier with camel-case after the dots.**
+  `backup.mediaCredentials`, which Signal assigns to a constant called
+  `KEY_MEDIA_CREDENTIALS`, seven times in one file. Two dotted segments is one
+  fewer than the reverse-DNS filter wanted, so the humps carry the argument
+  instead -- a JWT is also three dotted segments and breaks apart on its first.
+- **Interpolation in three more spellings.** Python's empty format pair, so
+  Azure's `"SharedKey {}:{}"` is a template rather than an Authorization
+  header, and a *shouted* shell variable anywhere in a value, so
+  `multiplier@https://$KV_NAME.vault.azure.net` is a Key Vault reference rather
+  than the secret it points at. Shouted is the requirement: a bcrypt hash and a
+  stray dollar in a password both put lower-case after the `$`.
+- **A Google API key in Google's own client configuration is weakened rather
+  than dropped.** Under `google_api_key`, `google_crash_reporting_api_key` or
+  `current_key`, the key ships inside the application binary and Google's
+  guidance is to restrict it rather than hide it. It stays reported, at one
+  step less confidence, because whether it *is* restricted is the thing that
+  matters and nothing in the file says. Provider rules gained a `weaken` hook
+  alongside `reject` for this, because "a key somebody chose to publish" and
+  "not a key" are different claims.
+
+Round five re-measurement: azureml 1,557 to 1,284, Signal 8 to 5, and four
+findings off the pinned corpus -- argo-cd's `admin.passwordMtime` and three Vue
+template bindings in n8n. No new findings anywhere; terragoat and
+kubernetes-goat unchanged.
+
+Two classes from round six, which continued round five's axis and closed a gap
+it named: `signalapp/Signal-iOS` for Swift, `.plist` and `.xcconfig`, and
+`microsoft/azure-pipelines-tasks` for PowerShell and the thinnest-measured of
+the five CI scanners.
+
+- **An acronym between two humps.** `lastKnownWorkingAPNSTokenKey` and
+  `kUDUnrestrictedAccessKey`, each assigned to a constant of exactly that name.
+  Round three handled an acronym at either end; the middle is where Apple's
+  vocabulary puts them. A separate shape rather than a third alternative in the
+  existing one, because allowing an interior run of capitals needs every other
+  hump to be a capital and *two* lower-case letters -- without that the suite's
+  random-token property test found `ntNosjRjMjoZmHghZDXQnzp` in a few hundred
+  tries. The real Giphy key three lines away stays reported.
+- **A literal being concatenated is a fragment of a value.**
+  `"SharedAccessSignature sr=" + resourceUri + …`, assigned to `token` in
+  azure-pipelines-tasks' IoT Hub task. The same position the fixture convention
+  takes from the other side: a credential split across a concatenation is one
+  no scanner reads.
+
+Round six re-measurement: Signal-iOS 30 to 27, azure-pipelines-tasks 87 to 86,
+and two findings off the pinned corpus -- an `access_token=` fragment and a JWT
+prefix being concatenated in an n8n test. The AZ family and the Kubernetes
+rules were read across 87 findings and had nothing wrong in them.
+
+- **Each distinct fix is printed on the first finding that carries it**, rather
+  than on every one.
+  Azure's machine-learning examples generate a workflow per example, 355 of
+  them, and produce 845 unpinned-action findings; the report printed the same
+  forty-word remediation 845 times and came to 6,422 lines. It is now 5,148.
+  The count of what was left out goes in the summary, because silently
+  dropping a line from a security report is worse than the repetition. Keyed on
+  the sentence rather than on the rule, because a rule may have more than one --
+  SH003 says something different about `chmod 777` than about `chmod +w`. JSON,
+  SARIF and the other four formats are unchanged -- they are read by machines,
+  which do not mind.
+
+Two classes and one over-claim from round seven --
+`hashicorp/terraform-provider-aws` for Terraform at a scale nothing else
+reaches, and `bazelbuild/bazel` for Starlark and a build system's shell.
+
+- **`chmod +w` is not `chmod 777`, and SH003 now says so.** POSIX excludes the
+  bits the umask sets from a who-less mode, so under the usual 022 a bare `+w`
+  is the owner alone; under umask 0 it is everybody. Bazel writes it in two
+  build scripts and both were reported as world-writable at medium confidence,
+  which is a claim about the machine's umask that no reader of the file can
+  check. An explicit `a`, an `o`, or an octal mode still says world-writable as
+  fact; a bare `+w` now says *writable as widely as the umask allows*, at low.
+- **A fixture directory is written four ways.** `test-fixtures`,
+  `test_fixtures`, `testfixtures` and `__fixtures__` are one directory, and the
+  list knew only the last two. terraform-provider-aws uses the first
+  throughout, so three findings there kept a confidence a fixture tree should
+  have lowered. Directory names are now compared with their separators taken
+  out, which is also what makes `__mocks__` unnecessary as a separate entry.
+- **A dollar-prefixed dotted reference is a reference.**
+  `$request.header.x-api-key` is how API Gateway names the key to look at, and
+  `$dex.github.clientSecret` is how Argo CD's own manual tells you to point at
+  a secret rather than write one -- the tool was reporting argo-cd's
+  documentation as a leak, four times.
+
+Round seven re-measurement: terraform-provider-aws 594 to 592 with three
+findings correctly weakened, bazel unchanged at 22 with two weakened, and six
+findings off the pinned corpus -- all six of them Argo CD or n8n secret
+references. The 594 findings in terraform-provider-aws were read: the
+Terraform family was right about every one of the 470 in `testdata/`, and had
+already lowered their confidence.
+
+- **Five of the repositories the precision programme read are now pinned**, so
+  what rounds four to seven fixed stays fixed: `plausible` (Elixir and
+  Phoenix), `bitwarden-server` (C#), `signal-ios` (Swift, `.plist`,
+  `.xcconfig`), `signal-android` (Kotlin and Gradle) and `bazel` (Starlark).
+  Each carries a language or a file format none of the other twenty-one does,
+  and an unpinned repository protects nothing -- round eight can silently undo
+  what round five fixed, and the comparison that would have caught it never
+  runs. The corpus is twenty-six.
+
+  Three more were read in full and deliberately **not** pinned, with the
+  reasoning recorded beside the pins: a pin costs every future measurement
+  twice over and costs a contributor a clone.
+  `terraform-provider-aws` is 87 seconds of scan for one class that was already
+  correct, `azureml-examples` is 931 MB for a behaviour a unit test pins with a
+  synthetic payload, and `azure-pipelines-tasks` is 251 MB for a single class.
+
+  Every measurement recorded before this -- here, in `ROADMAP.md` and in the
+  documentation -- was taken across twenty-one repositories and says so. Those
+  are records of what was measured rather than claims about the corpus's
+  present size, and they have not been restated.
+
 ### Documented
 
 - **Fourteen candidate spellings for an eighth application-code rule,
